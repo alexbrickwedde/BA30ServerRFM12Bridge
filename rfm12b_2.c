@@ -58,7 +58,6 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 
-
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -80,44 +79,46 @@
 
 // Device settings
 static const char *device = "/dev/spidev0.0";
-static uint8_t     spi_mode = 0;
-static uint8_t     spi_bits = 8;		// Must be 8-bit, as that's the only mode the SPI driver support
-static uint32_t    spi_speed = 2500000;		// 2.5 MHz is the maximum rate the RF12 support (??)
-						// Going above this value gives wrong readings, and errors
-						// ...^^^ is this really true? it probably won't even reaching
-						//    the speed of 2.5 MHz...
-static uint16_t    spi_delay = 0;		// Must be 0, we don't want a delay
+static uint8_t spi_mode = 0;
+static uint8_t spi_bits = 8; // Must be 8-bit, as that's the only mode the SPI driver support
+static uint32_t spi_speed = 2500000; // 2.5 MHz is the maximum rate the RF12 support (??)
+// Going above this value gives wrong readings, and errors
+// ...^^^ is this really true? it probably won't even reaching
+//    the speed of 2.5 MHz...
+static uint16_t spi_delay = 0;		// Must be 0, we don't want a delay
 
 //
 // Helper function for fatal errors
 //
-static void pabort(const char *s)
+static void
+pabort(const char *s)
 {
-        perror(s);
-        abort();
+  perror(s);
+  abort();
 }
 
 //
 // Helper function for dumping the status byte
 //
-void dumpStatusByte(uint16_t result)
+void
+dumpStatusByte(uint16_t result)
 {
 #ifdef DEBUG_STATUS
 
-	printf("Cmd[$0000]: FFIT POR  FFOV WKUP EXT  LBD  FFEM RSSI DQD  CRL  ATGL SIGN OFFS\n");
-	printf("             %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d   %03d\n"
-              , (result >> 15) & 0x01
-	      , (result >> 14) & 0x01
-	      , (result >> 13) & 0x01
-	      , (result >> 12) & 0x01
-              , (result >> 11) & 0x01
-              , (result >> 10) & 0x01
-              , (result >>  9) & 0x01
-              , (result >>  8) & 0x01
-              , (result >>  7) & 0x01
-	      , (result >>  6) & 0x01
-	      , (uint8_t) (result & 0x0F)
-              );
+  printf("Cmd[$0000]: FFIT POR  FFOV WKUP EXT  LBD  FFEM RSSI DQD  CRL  ATGL SIGN OFFS\n");
+  printf("             %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d    %01d   %03d\n"
+      , (result >> 15) & 0x01
+      , (result >> 14) & 0x01
+      , (result >> 13) & 0x01
+      , (result >> 12) & 0x01
+      , (result >> 11) & 0x01
+      , (result >> 10) & 0x01
+      , (result >> 9) & 0x01
+      , (result >> 8) & 0x01
+      , (result >> 7) & 0x01
+      , (result >> 6) & 0x01
+      , (uint8_t) (result & 0x0F)
+  );
 
 #endif
 }
@@ -125,52 +126,49 @@ void dumpStatusByte(uint16_t result)
 //
 // rf12_xferSend
 //
-void rf12_xferSend(int fd, unsigned char *ptx_buf, unsigned char *prx_buf, int len)
+void
+rf12_xferSend(int fd, unsigned char *ptx_buf, unsigned char *prx_buf, int len)
 {
-        // At least one of the buffers should be assigned
-        if ( (ptx_buf == NULL) && (prx_buf == NULL) )
-                pabort("rf12_xfer: Both transmit and receive buffers are NULL!\n");
+  // At least one of the buffers should be assigned
+  if ((ptx_buf == NULL) && (prx_buf == NULL))
+    pabort("rf12_xfer: Both transmit and receive buffers are NULL!\n");
 
-        //
-        struct          spi_ioc_transfer xfer[1];
-        int             status;
+  //
+  struct spi_ioc_transfer xfer[1];
+  int status;
 
-        // Clear spi_ioc_transfer structure
-        memset(xfer, 0, sizeof(xfer));
+  // Clear spi_ioc_transfer structure
+  memset(xfer, 0, sizeof(xfer));
 
-        // Set up spi_ioc_transfer structure
-        // ...rf12 uses full duplex, so we receive bits while we're sending...
-        int count;
-        for (count = 0; count < len/2; count++)
-        {
-		// Wait for interrupt
-		while (digitalRead(7) != 0)
-			;
+  // Set up spi_ioc_transfer structure
+  // ...rf12 uses full duplex, so we receive bits while we're sending...
+  int count;
+  for (count = 0; count < len / 2; count++)
+  {
+    // Wait for interrupt
+    while (digitalRead(7) != 0)
+      ;
 
-                xfer[0].tx_buf = (unsigned long) (ptx_buf + (count*2));
-                xfer[0].rx_buf = (unsigned long) (prx_buf + (count*2));
-                xfer[0].len    = 2;
-                xfer[0].delay_usecs   = spi_delay;
-                xfer[0].speed_hz      = spi_speed;
-                xfer[0].bits_per_word = spi_bits;
+    xfer[0].tx_buf = (unsigned long) (ptx_buf + (count * 2));
+    xfer[0].rx_buf = (unsigned long) (prx_buf + (count * 2));
+    xfer[0].len = 2;
+    xfer[0].delay_usecs = spi_delay;
+    xfer[0].speed_hz = spi_speed;
+    xfer[0].bits_per_word = spi_bits;
 
-	        status = ioctl(fd, SPI_IOC_MESSAGE(1), xfer);
-	        if (status < 0)
-	        {
-	                pabort("SP_IOC_MESSAGE");
-	        }
-		
-		// Strangely enough this seems to help for sending, don't know why
-		// Regardless, only about 40% of the messages really get out...
-		delayMicroseconds(20);
-	}
+    status = ioctl(fd, SPI_IOC_MESSAGE(1), xfer);
+    if (status < 0)
+    {
+      pabort("SP_IOC_MESSAGE");
+    }
 
-        return;
+    // Strangely enough this seems to help for sending, don't know why
+    // Regardless, only about 40% of the messages really get out...
+    delayMicroseconds(20);
+  }
+
+  return;
 }
-
-
-
-
 
 //
 // rf12_xferCmd
@@ -179,268 +177,261 @@ void rf12_xferSend(int fd, unsigned char *ptx_buf, unsigned char *prx_buf, int l
 //
 uint16_t rf12_xferCmd(int fd, uint16_t cmd)
 {
-	struct		spi_ioc_transfer xfer[1];
-	unsigned char	tx_buf[2];
-	unsigned char	rx_buf[2];
-	int		len;
-	int		status;
+  struct spi_ioc_transfer xfer[1];
+  unsigned char tx_buf[2];
+  unsigned char rx_buf[2];
+  int len;
+  int status;
 
-	
-        // Clear spi_ioc_transfer structure
-        memset(xfer, 0, sizeof(xfer));
+  // Clear spi_ioc_transfer structure
+  memset(xfer, 0, sizeof(xfer));
 
-	// Store command in buffer
-	tx_buf[0] = (cmd >> 8) & 0xff;
-	tx_buf[1] = (cmd     ) & 0xff;
+  // Store command in buffer
+  tx_buf[0] = (cmd >> 8) & 0xff;
+  tx_buf[1] = (cmd) & 0xff;
 
-	// Set up spi_ioc_transfer structure
-	// ...rf12 uses full duplex, so we receive bits the
-	//    while we're sending
-	xfer[0].tx_buf = (unsigned long) tx_buf;
-	xfer[0].rx_buf = (unsigned long) rx_buf;
-	xfer[0].len    = 2;
-	xfer[0].delay_usecs	= spi_delay;
-	xfer[0].speed_hz	= spi_speed;
-	xfer[0].bits_per_word	= spi_bits;
-	
-	status = ioctl(fd, SPI_IOC_MESSAGE(1), xfer);
-	if (status < 0)
-	{
-		pabort("SPI_IOC_MESSAGE");
-	}
+  // Set up spi_ioc_transfer structure
+  // ...rf12 uses full duplex, so we receive bits the
+  //    while we're sending
+  xfer[0].tx_buf = (unsigned long) tx_buf;
+  xfer[0].rx_buf = (unsigned long) rx_buf;
+  xfer[0].len = 2;
+  xfer[0].delay_usecs = spi_delay;
+  xfer[0].speed_hz = spi_speed;
+  xfer[0].bits_per_word = spi_bits;
 
-	return (rx_buf[0] << 8) | rx_buf[1];
+  status = ioctl(fd, SPI_IOC_MESSAGE(1), xfer);
+  if (status < 0)
+  {
+    pabort("SPI_IOC_MESSAGE");
+  }
+
+  return (rx_buf[0] << 8) | rx_buf[1];
 
 }
 
 //
 // rf12_initialize
 //
-void rf12_initialize(int fd)
+void
+rf12_initialize(int fd)
 {
-	uint16_t result;
+  uint16_t result;
 
-	printf("--------------------------------------------------------------------------------\n");
-	printf("rf12_initialize()\n");
-	printf("--------------------------------------------------------------------------------\n");
+  printf("--------------------------------------------------------------------------------\n");
+  printf("rf12_initialize()\n");
+  printf("--------------------------------------------------------------------------------\n");
 
-	// Read status byte
-	result = rf12_xferCmd(fd, 0x0000);		// intitial SPI transfer added to avoid power-up problem
-	result = rf12_xferCmd(fd, RF_TXREG_WRITE);	// in case we're still in OOK mode
+  // Read status byte
+  result = rf12_xferCmd(fd, 0x0000);	// intitial SPI transfer added to avoid power-up problem
+  result = rf12_xferCmd(fd, RF_TXREG_WRITE);	// in case we're still in OOK mode
 
-	// Wait until RFM12B is out of power-up reset
-	while(digitalRead(7) == 0)
-	{
-		result = rf12_xferCmd(fd, 0x0000);
-		break;
-	}
+  // Wait until RFM12B is out of power-up reset
+  while (digitalRead(7) == 0)
+  {
+    result = rf12_xferCmd(fd, 0x0000);
+    break;
+  }
 
-	result = rf12_xferCmd(fd, 0x80E7 ); //| (band << 4));// EL (ena TX), EF (ena RX FIFO), 12.0pF
-	result = rf12_xferCmd(fd, 0xA67C);		// 868MHz
-	result = rf12_xferCmd(fd, 0xC6BF);
-	result = rf12_xferCmd(fd, 0x948C);
-	result = rf12_xferCmd(fd, 0xC2AB);
-	result = rf12_xferCmd(fd, 0xCA81);
-	result = rf12_xferCmd(fd, 0xC4F7);
-	result = rf12_xferCmd(fd, 0x9850);
-	result = rf12_xferCmd(fd, 0xE000);
-	result = rf12_xferCmd(fd, 0xC800);
-	result = rf12_xferCmd(fd, 0xC0E0);
+  result = rf12_xferCmd(fd, 0x80E7); //| (band << 4));// EL (ena TX), EF (ena RX FIFO), 12.0pF
+  result = rf12_xferCmd(fd, 0xA67C);		// 868MHz
+  result = rf12_xferCmd(fd, 0xC6BF);
+  result = rf12_xferCmd(fd, 0x948C);
+  result = rf12_xferCmd(fd, 0xC2AB);
+  result = rf12_xferCmd(fd, 0xCA81);
+  result = rf12_xferCmd(fd, 0xC4F7);
+  result = rf12_xferCmd(fd, 0x9850);
+  result = rf12_xferCmd(fd, 0xE000);
+  result = rf12_xferCmd(fd, 0xC800);
+  result = rf12_xferCmd(fd, 0xC0E0);
 }
 
-
-
-
-
-
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
-	if (wiringPiSetup() == -1)
-		pabort("Failed to setup wiringPi");
+  if (wiringPiSetup() == -1)
+  {
+    pabort("Failed to setup wiringPi");
+  }
 
-	// Setup IRQ pin	
-	pinMode(7, INPUT);
-	pullUpDnControl(7, PUD_UP);
+  pinMode(7, INPUT);
+  pullUpDnControl(7, PUD_UP);
 
-	int ret = 0;
-	int fd;
+  int ret = 0;
+  int fd;
 
-	// Open connection to SPI bus
-	fd = open(device, O_RDWR);
-	if (fd < 0)
-		pabort("Can't open device");
+  fd = open(device, O_RDWR);
+  if (fd < 0)
+    pabort("Can't open device");
 
-	// Set SPI mode
-	ret = ioctl(fd, SPI_IOC_WR_MODE, &spi_mode);
-	if (ret == -1)
-		pabort("Can't set SPI mode");
+  ret = ioctl(fd, SPI_IOC_WR_MODE, &spi_mode);
+  if (ret == -1)
+    pabort("Can't set SPI mode");
 
-	ret = ioctl(fd, SPI_IOC_RD_MODE, &spi_mode);
-	if (ret == -1)
-		pabort("Can't set SPI mode");
+  ret = ioctl(fd, SPI_IOC_RD_MODE, &spi_mode);
+  if (ret == -1)
+    pabort("Can't set SPI mode");
 
-	// Bits per word
-	ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &spi_bits);
-	if (ret == -1)
-		pabort("Can't set bits per word");
+  // Bits per word
+  ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &spi_bits);
+  if (ret == -1)
+    pabort("Can't set bits per word");
 
-	ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &spi_bits);
-	if (ret == -1)
-		pabort("Can't set bits per word");
+  ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &spi_bits);
+  if (ret == -1)
+    pabort("Can't set bits per word");
 
-	// Max speed hz
-	ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &spi_speed);
-	if (ret == -1)
-		pabort("Can't set max speed hz");
+  // Max speed hz
+  ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &spi_speed);
+  if (ret == -1)
+    pabort("Can't set max speed hz");
 
-	ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &spi_speed);
-        if (ret == -1)
-                pabort("Can't set max speed hz");
+  ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &spi_speed);
+  if (ret == -1)
+    pabort("Can't set max speed hz");
 
-	printf("spi mode: %d\n", spi_mode);
-        printf("bits per word: %d\n", spi_bits);
-        printf("max speed: %d Hz (%d KHz)\n", spi_speed, spi_speed/1000);
+  printf("spi mode: %d\n", spi_mode);
+  printf("bits per word: %d\n", spi_bits);
+  printf("max speed: %d Hz (%d KHz)\n", spi_speed, spi_speed / 1000);
 
+  rf12_initialize(fd);
 
+  uint16_t result;
 
+  printf("--------------------------------------------------------------------------------\n");
+  printf("Setting up to receive data\n");
+  printf("--------------------------------------------------------------------------------\n");
 
+  result = rf12_xferCmd(fd, 0xCA83);
+  result = rf12_xferCmd(fd, RF_RECEIVER_ON);
 
-	// Setup RFM12b module
-	rf12_initialize(fd);
+  printf("--------------------------------------------------------------------------------\n");
+  printf("Start receiving data\n");
+  printf("--------------------------------------------------------------------------------\n");
 
-	uint16_t result;
-
-	printf("--------------------------------------------------------------------------------\n");
-	printf("Setting up to receive data\n");
-	printf("--------------------------------------------------------------------------------\n");
-
-        result = rf12_xferCmd(fd, 0xCA83);
-        result = rf12_xferCmd(fd, RF_RECEIVER_ON);
-
-	
-	printf("--------------------------------------------------------------------------------\n");
-	printf("Start receiving data\n");
-	printf("--------------------------------------------------------------------------------\n");
-
-
-	unsigned char		buf[1024], *bp;
-	int			len		= 0;
-	int			missed		= 0;
-	unsigned int size = 5;
-	while (1)
-	{
-		usleep(1500);
+  unsigned char buf[1024], *bp;
+  int len = 0;
+  int missed = 0;
+  unsigned int size = 5;
+  while (1)
+  {
+    usleep(1500);
 //		if (digitalRead(7) == 0)
-		{
-			uint16_t status = rf12_xferCmd(fd, 0x0000);
+//		{
+    uint16_t status = rf12_xferCmd(fd, 0x0000);
 
-			// Test if buffer is not empty (IRQ can occur for multiple reasons)
-			while ((status & 0x0200) != 0x0200)
-			{
-				usleep(750);
+    // Test if buffer is not empty (IRQ can occur for multiple reasons)
+    while ((status & 0x0200) != 0x0200)
+    {
+      usleep(750);
 
-				// Test for buffer overrun, and warn us about it
-				if ((status & 0x2000) == 0x2000)
-					printf("Buffer overrun (but most of the time, nothing is missing... weird...)!\n");
+      // Test for buffer overrun, and warn us about it
+      if ((status & 0x2000) == 0x2000)
+        printf("Buffer overrun (but most of the time, nothing is missing... weird...)!\n");
 
-				// Check if at least 8 bits are in (FFIT flag)
-				if ((status & 0x8000) == 0x8000)
-				{
-					dumpStatusByte(status);
+      // Check if at least 8 bits are in (FFIT flag)
+      if ((status & 0x8000) == 0x8000)
+      {
+        dumpStatusByte(status);
 
-					uint16_t byteRead = rf12_xferCmd(fd, 0xB000);
+        uint16_t byteRead = rf12_xferCmd(fd, 0xB000);
 
-					// We stop storing bytes if a message is complete, or if the
-					// maximum buffer size is reached
-					if ( (len <= 1023)  ) // && ( (len < 2) || ( (len >= 2) && (buf[1]+4 > len) ) ) )
-					{
-						buf[len] = byteRead & 0xff;
-	        	                        len++;
-					}
-				}
+        // We stop storing bytes if a message is complete, or if the
+        // maximum buffer size is reached
+        if ((len <= 1023)) // && ( (len < 2) || ( (len >= 2) && (buf[1]+4 > len) ) ) )
+        {
+          buf[len] = byteRead & 0xff;
+          len++;
+        }
+      }
 
-				status = rf12_xferCmd(fd, 0x0000);
+      status = rf12_xferCmd(fd, 0x0000);
 
-				if ( (len == 5 ) && (size == 5))
-				{
-				     switch (buf[4]) {
-				      case 'M':
-				        size = 11;
-				        break;
-				      case 'e':
-				        size = 9;
-				        break;
-				      case 'f':
-				        size = 19;
-				        break;
-				      case 'T':
-				        size = 25;
-				        break;
-				      case 'g':
-				        size = 19;
-				        break;
-				      default:
-				        size = 6;
-				        break;
-				      }
-				      printf("size = (%02x): ", size);
-				}
-				if (len >= size)
-				{
-				  break;
-				}
+      if ((len == 5) && (size == 5))
+      {
+        switch (buf[4])
+        {
+        case 'M':
+          size = 11;
+          break;
+        case 'e':
+          size = 9;
+          break;
+        case 'f':
+          size = 19;
+          break;
+        case 'T':
+          size = 25;
+          break;
+        case 'g':
+          size = 19;
+          break;
+        default:
+          size = 6;
+          break;
+        }
+        printf("size = (%02x): ", size);
+      }
+      if (len >= size)
+      {
+        break;
+      }
 
-			}
-		}
-		
-		if ( ( len >= 1024 ) || (len >= size) ) //|| ( ( len >= 2 ) && ( buf[1]+4 <= len ) ) )
-		{
-			int status = rf12_xferCmd(fd, 0x8208);
-			
-			printf("read data(%02x): ", len);
-                        for (bp = buf; len; len--)
-                        	printf(" %02x", *bp++);
-                        printf("\n");
+    }
+//		}
 
-			sendudp(buf, size);
+    if ((len >= 1024) || (len >= size))
+    {
+      int status = rf12_xferCmd(fd, 0x8208);
 
-                        len = 0;
-       			size = 5;
+      printf("read data(%02x): ", len);
+      for (bp = buf; len; len--)
+        printf(" %02x", *bp++);
+      printf("\n");
 
-			status = rf12_xferCmd(fd, 0x82C8);
-			status = rf12_xferCmd(fd, 0xCA81);
-			status = rf12_xferCmd(fd, 0xCA83);
-		}
-	}
-	
-	close(fd);
-	return ret;
+      sendudp(buf, size);
+
+      len = 0;
+      size = 5;
+
+      status = rf12_xferCmd(fd, 0x82C8);
+      status = rf12_xferCmd(fd, 0xCA81);
+      status = rf12_xferCmd(fd, 0xCA83);
+    }
+  }
+
+  close(fd);
+  return ret;
 }
 
-int sendudp(char *buf, int size)
+void
+sendudp(char *buf, int size)
 {
-    int sd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sd<=0) {
-        return;
-    }
+  int sd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (sd <= 0)
+  {
+    return;
+  }
 
-    int broadcastEnable=1;
-    int ret=setsockopt(sd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
-    if (ret) {
-        close(sd);
-        return;
-    }
-    struct sockaddr_in broadcastAddr; // Make an endpoint
-    memset(&broadcastAddr, 0, sizeof broadcastAddr);
-    broadcastAddr.sin_family = AF_INET;
-    inet_pton(AF_INET, "10.1.0.255", &broadcastAddr.sin_addr); // Set the broadcast IP address
-    broadcastAddr.sin_port = htons(12345); // Set port 1900
-
-    ret = sendto(sd, buf, size, 0, (struct sockaddr*)&broadcastAddr, sizeof broadcastAddr);
-    if (ret<0) {
-        close(sd);
-        return;
-    }
+  int broadcastEnable = 1;
+  int ret = setsockopt(sd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
+  if (ret)
+  {
     close(sd);
+    return;
+  }
+  struct sockaddr_in broadcastAddr; // Make an endpoint
+  memset(&broadcastAddr, 0, sizeof broadcastAddr);
+  broadcastAddr.sin_family = AF_INET;
+  inet_pton(AF_INET, "10.1.0.255", &broadcastAddr.sin_addr); // Set the broadcast IP address
+  broadcastAddr.sin_port = htons(12345); // Set port 1900
+
+  ret = sendto(sd, buf, size, 0, (struct sockaddr*) &broadcastAddr, sizeof broadcastAddr);
+  if (ret < 0)
+  {
+    close(sd);
+    return;
+  }
+  close(sd);
 }
 
