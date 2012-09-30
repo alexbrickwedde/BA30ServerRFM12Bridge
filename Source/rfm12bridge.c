@@ -180,7 +180,6 @@ uint16_t rf12_xferCmd(int fd, uint16_t cmd)
   struct spi_ioc_transfer xfer[1];
   unsigned char tx_buf[2];
   unsigned char rx_buf[2];
-  int len;
   int status;
 
   // Clear spi_ioc_transfer structure
@@ -216,34 +215,64 @@ uint16_t rf12_xferCmd(int fd, uint16_t cmd)
 void
 rf12_initialize(int fd)
 {
-  uint16_t result;
 
   printf("--------------------------------------------------------------------------------\n");
   printf("rf12_initialize()\n");
   printf("--------------------------------------------------------------------------------\n");
 
   // Read status byte
-  result = rf12_xferCmd(fd, 0x0000);	// intitial SPI transfer added to avoid power-up problem
-  result = rf12_xferCmd(fd, RF_TXREG_WRITE);	// in case we're still in OOK mode
+  rf12_xferCmd(fd, 0x0000);	// intitial SPI transfer added to avoid power-up problem
+  rf12_xferCmd(fd, RF_TXREG_WRITE);	// in case we're still in OOK mode
 
   // Wait until RFM12B is out of power-up reset
   while (digitalRead(7) == 0)
   {
-    result = rf12_xferCmd(fd, 0x0000);
+    rf12_xferCmd(fd, 0x0000);
     break;
   }
 
-  result = rf12_xferCmd(fd, 0x80E7); //| (band << 4));// EL (ena TX), EF (ena RX FIFO), 12.0pF
-  result = rf12_xferCmd(fd, 0xA67C);		// 868MHz
-  result = rf12_xferCmd(fd, 0xC6BF);
-  result = rf12_xferCmd(fd, 0x948C);
-  result = rf12_xferCmd(fd, 0xC2AB);
-  result = rf12_xferCmd(fd, 0xCA81);
-  result = rf12_xferCmd(fd, 0xC4F7);
-  result = rf12_xferCmd(fd, 0x9850);
-  result = rf12_xferCmd(fd, 0xE000);
-  result = rf12_xferCmd(fd, 0xC800);
-  result = rf12_xferCmd(fd, 0xC0E0);
+  rf12_xferCmd(fd, 0x80E7); //| (band << 4));// EL (ena TX), EF (ena RX FIFO), 12.0pF
+  rf12_xferCmd(fd, 0xA67C);		// 868MHz
+  rf12_xferCmd(fd, 0xC6BF);
+  rf12_xferCmd(fd, 0x948C);
+  rf12_xferCmd(fd, 0xC2AB);
+  rf12_xferCmd(fd, 0xCA81);
+  rf12_xferCmd(fd, 0xC4F7);
+  rf12_xferCmd(fd, 0x9850);
+  rf12_xferCmd(fd, 0xE000);
+  rf12_xferCmd(fd, 0xC800);
+  rf12_xferCmd(fd, 0xC0E0);
+}
+
+void
+sendudp(unsigned char *buf, int size)
+{
+  int sd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (sd <= 0)
+  {
+    return;
+  }
+
+  int broadcastEnable = 1;
+  int ret = setsockopt(sd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
+  if (ret)
+  {
+    close(sd);
+    return;
+  }
+  struct sockaddr_in broadcastAddr; // Make an endpoint
+  memset(&broadcastAddr, 0, sizeof broadcastAddr);
+  broadcastAddr.sin_family = AF_INET;
+  inet_pton(AF_INET, "10.1.0.255", &broadcastAddr.sin_addr); // Set the broadcast IP address
+  broadcastAddr.sin_port = htons(12345); // Set port 1900
+
+  ret = sendto(sd, buf, size, 0, (struct sockaddr*) &broadcastAddr, sizeof broadcastAddr);
+  if (ret < 0)
+  {
+    close(sd);
+    return;
+  }
+  close(sd);
 }
 
 int
@@ -296,14 +325,12 @@ main(int argc, char *argv[])
 
   rf12_initialize(fd);
 
-  uint16_t result;
-
   printf("--------------------------------------------------------------------------------\n");
   printf("Setting up to receive data\n");
   printf("--------------------------------------------------------------------------------\n");
 
-  result = rf12_xferCmd(fd, 0xCA83);
-  result = rf12_xferCmd(fd, RF_RECEIVER_ON);
+  rf12_xferCmd(fd, 0xCA83);
+  rf12_xferCmd(fd, RF_RECEIVER_ON);
 
   printf("--------------------------------------------------------------------------------\n");
   printf("Start receiving data\n");
@@ -311,7 +338,6 @@ main(int argc, char *argv[])
 
   unsigned char buf[1024], *bp;
   int len = 0;
-  int missed = 0;
   unsigned int size = 5;
   while (1)
   {
@@ -382,7 +408,7 @@ main(int argc, char *argv[])
 
     if ((len >= 1024) || (len >= size))
     {
-      int status = rf12_xferCmd(fd, 0x8208);
+      rf12_xferCmd(fd, 0x8208);
 
       printf("read data(%02x): ", len);
       for (bp = buf; len; len--)
@@ -394,44 +420,13 @@ main(int argc, char *argv[])
       len = 0;
       size = 5;
 
-      status = rf12_xferCmd(fd, 0x82C8);
-      status = rf12_xferCmd(fd, 0xCA81);
-      status = rf12_xferCmd(fd, 0xCA83);
+      rf12_xferCmd(fd, 0x82C8);
+      rf12_xferCmd(fd, 0xCA81);
+      rf12_xferCmd(fd, 0xCA83);
     }
   }
 
   close(fd);
   return ret;
-}
-
-void
-sendudp(char *buf, int size)
-{
-  int sd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (sd <= 0)
-  {
-    return;
-  }
-
-  int broadcastEnable = 1;
-  int ret = setsockopt(sd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
-  if (ret)
-  {
-    close(sd);
-    return;
-  }
-  struct sockaddr_in broadcastAddr; // Make an endpoint
-  memset(&broadcastAddr, 0, sizeof broadcastAddr);
-  broadcastAddr.sin_family = AF_INET;
-  inet_pton(AF_INET, "10.1.0.255", &broadcastAddr.sin_addr); // Set the broadcast IP address
-  broadcastAddr.sin_port = htons(12345); // Set port 1900
-
-  ret = sendto(sd, buf, size, 0, (struct sockaddr*) &broadcastAddr, sizeof broadcastAddr);
-  if (ret < 0)
-  {
-    close(sd);
-    return;
-  }
-  close(sd);
 }
 
