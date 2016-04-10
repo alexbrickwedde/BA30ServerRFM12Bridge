@@ -386,6 +386,9 @@ main(int argc, char *argv[])
         case 'f':
           size = 19;
           break;
+        case 'L':
+          size = 29;
+          break;
         case 'T':
           size = 25;
           break;
