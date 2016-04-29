@@ -105,6 +105,8 @@ sendudp(unsigned char *buf, int size)
   close(sd);
 }
 
+extern void pabort(const char *s);
+
 int
 main(int argc, char *argv[])
 {

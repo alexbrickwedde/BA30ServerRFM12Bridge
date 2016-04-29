@@ -48,8 +48,6 @@ typedef enum
   RFM69_DATA_MODE_PACKET = 0,                 //!< Packet engine active
 } RFM69DataMode;
 
-static void pabort(const char *s);
-
 /** RFM69 driver library for STM32 controllers. */
 class RFM69
 {
