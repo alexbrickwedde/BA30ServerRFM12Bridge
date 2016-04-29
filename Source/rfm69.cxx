@@ -95,7 +95,7 @@ static uint16_t spi_delay = 0;    // Must be 0, we don't want a delay
 //
 // Helper function for fatal errors
 //
-static void pabort(const char *s)
+void pabort(const char *s)
 {
   perror(s);
   abort();
@@ -590,6 +590,13 @@ void RFM69::setCustomConfig(const uint8_t config[][2], unsigned int length)
   }
 }
 
+uint32_t HAL_GetTick()
+{
+  struct timespec spec;
+  clock_gettime(CLOCK_REALTIME, &spec);
+  return (spec.tv_sec + (spec.tv_nsec / 1000000));
+}
+
 /**
  * Send a packet over the air.
  *
@@ -624,45 +631,45 @@ int RFM69::send(const void* data, unsigned int dataLength)
   if (0 == dataLength)
     return 0;
 
-//  /* Wait for a free channel, if CSMA/CA algorithm is enabled.
-//   * This takes around 1,4 ms to finish if channel is free */
-//  if (true == _csmaEnabled)
-//  {
-//    // Restart RX
-//    writeRegister(0x3D, (readRegister(0x3D) & 0xFB) | 0x20);
-//
-//    // switch to RX mode
-//    setMode(RFM69_MODE_RX);
-//
-//    // wait until RSSI sampling is done; otherwise, 0xFF (-127 dBm) is read
-//
-//    // RSSI sampling phase takes ~960 µs after switch from standby to RX
-//    uint32_t timeEntry = HAL_GetTick();
-//    while (((readRegister(0x23) & 0x02) == 0) && ((HAL_GetTick() - timeEntry) < 10));
-//
-//    while ((false == channelFree()) && ((HAL_GetTick() - timeEntry) < TIMEOUT_CSMA_READY))
-//    {
-//      // wait for a random time before checking again
-//      HAL_Delay(rand() % 10);
-//
-//      /* try to receive packets while waiting for a free channel
-//       * and put them into a temporary buffer */
-//      int bytesRead;
-//      if ((bytesRead = _receive(_rxBuffer, RFM69_MAX_PAYLOAD)) > 0)
-//      {
-//        _rxBufferLength = bytesRead;
-//
-//        // module is in RX mode again
-//
-//        // Restart RX and wait until RSSI sampling is done
-//        writeRegister(0x3D, (readRegister(0x3D) & 0xFB) | 0x20);
-//        uint32_t timeEntry = HAL_GetTick();
-//        while (((readRegister(0x23) & 0x02) == 0) && ((HAL_GetTick() - timeEntry) < 10));
-//      }
-//    }
-//
-//    setMode(RFM69_MODE_STANDBY);
-//  }
+  /* Wait for a free channel, if CSMA/CA algorithm is enabled.
+   * This takes around 1,4 ms to finish if channel is free */
+  if (true == _csmaEnabled)
+  {
+    // Restart RX
+    writeRegister(0x3D, (readRegister(0x3D) & 0xFB) | 0x20);
+
+    // switch to RX mode
+    setMode(RFM69_MODE_RX);
+
+    // wait until RSSI sampling is done; otherwise, 0xFF (-127 dBm) is read
+
+    // RSSI sampling phase takes ~960 µs after switch from standby to RX
+    uint32_t timeEntry = HAL_GetTick();
+    while (((readRegister(0x23) & 0x02) == 0) && ((HAL_GetTick() - timeEntry) < 10));
+
+    while ((false == channelFree()) && ((HAL_GetTick() - timeEntry) < TIMEOUT_CSMA_READY))
+    {
+      // wait for a random time before checking again
+      delay(rand() % 10);
+
+      /* try to receive packets while waiting for a free channel
+       * and put them into a temporary buffer */
+      int bytesRead;
+      if ((bytesRead = _receive(_rxBuffer, RFM69_MAX_PAYLOAD)) > 0)
+      {
+        _rxBufferLength = bytesRead;
+
+        // module is in RX mode again
+
+        // Restart RX and wait until RSSI sampling is done
+        writeRegister(0x3D, (readRegister(0x3D) & 0xFB) | 0x20);
+        uint32_t timeEntry = HAL_GetTick();
+        while (((readRegister(0x23) & 0x02) == 0) && ((HAL_GetTick() - timeEntry) < 10));
+      }
+    }
+
+    setMode(RFM69_MODE_STANDBY);
+  }
 
   // transfer packet to FIFO
   chipSelect();
@@ -697,12 +704,6 @@ void RFM69::clearFIFO()
   writeRegister(0x28, 0x10);
 }
 
-uint32_t HAL_GetTick()
-{
-  struct timespec spec;
-  clock_gettime(CLOCK_REALTIME, &spec);
-  return (spec.tv_sec + (spec.tv_nsec / 1000000));
-}
 /**
  * Wait until the requested mode is available or timeout.
  */

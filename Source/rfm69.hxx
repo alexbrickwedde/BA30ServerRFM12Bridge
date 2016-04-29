@@ -159,7 +159,7 @@ private:
   RFM69DataMode _dataMode;
   bool _highPowerSettings;
   bool _csmaEnabled;
-  char _rxBuffer[RFM69_MAX_PAYLOAD];
+  unsigned char _rxBuffer[RFM69_MAX_PAYLOAD];
   unsigned int _rxBufferLength;
   int _fd;
 

@@ -74,6 +74,8 @@ extern "C" {
 
 #include "rfm69.hxx"
 
+extern void pabort(const char *s);
+
 void
 sendudp(unsigned char *buf, int size)
 {
@@ -104,8 +106,6 @@ sendudp(unsigned char *buf, int size)
   }
   close(sd);
 }
-
-extern void pabort(const char *s);
 
 int
 main(int argc, char *argv[])
