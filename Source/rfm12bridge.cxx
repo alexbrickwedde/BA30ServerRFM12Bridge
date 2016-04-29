@@ -129,6 +129,7 @@ main(int argc, char *argv[])
   // init RF module and put it to sleep
   rfm69.init();
   rfm69.sleep();
+  rfm69.dumpRegisters();
 
   // set output power
   rfm69.setPowerDBm(13); // +13 dBm
