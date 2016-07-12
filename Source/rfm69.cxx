@@ -40,6 +40,7 @@
 #include <time.h>
 
 #include "rfm69.hxx"
+#include "rfm69registers.h"
 
 #define TIMEOUT_MODE_READY    100 ///< Maximum amount of time until mode switch [ms]
 #define TIMEOUT_PACKET_SENT   100 ///< Maximum amount of time until packet must be sent [ms]
@@ -52,41 +53,42 @@
  */
 static const uint8_t rfm69_base_config[][2] =
 {
-    {0x01, 0x04}, // RegOpMode: Standby Mode
-    {0x02, 0x00}, // RegDataModul: Packet mode, FSK, no shaping
-    {0x03, 0x0C}, // RegBitrateMsb: 10 kbps
-    {0x04, 0x80}, // RegBitrateLsb
-    {0x05, 0x01}, // RegFdevMsb: 20 kHz
-    {0x06, 0x48}, // RegFdevLsb
-    {0x07, 0xD9}, // RegFrfMsb: 868,30 MHz
-    {0x08, 0x13}, // RegFrfMid
-    {0x09, 0x33}, // RegFrfLsb
-    {0x18, 0x88}, // RegLNA: 200 Ohm impedance, gain set by AGC loop
-    {0x19, 0x4C}, // RegRxBw: 25 kHz
-    {0x2C, 0x00}, // RegPreambleMsb: 3 bytes preamble
-    {0x2D, 0x05}, // RegPreambleLsb
-    {0x2E, 0x98}, // RegSyncConfig: Enable sync word, 2 bytes sync word
-    {0x2F, 0xDE}, // RegSyncValue1: 0xDEADBEEF
-    {0x30, 0xAD}, // RegSyncValue2
-    {0x30, 0xBE}, // RegSyncValue3
-    {0x30, 0xEF}, // RegSyncValue4
-    {0x37, 0xD0}, // RegPacketConfig1: Variable length, CRC on, whitening
-    {0x38, 0x40}, // RegPayloadLength: 64 bytes max payload
-    {0x3C, 0x8F}, // RegFifoThresh: TxStart on FifoNotEmpty, 15 bytes FifoLevel
-    {0x58, 0x1B}, // RegTestLna: Normal sensitivity mode
-    {0x6F, 0x30}, // RegTestDagc: Improved margin, use if AfcLowBetaOn=0 (default)
+            {0x01, 0x04}, // RegOpMode: Standby Mode
+            {0x02, 0x00}, // RegDataModul: Packet mode, FSK, no shaping
+            {0x03, RF_BITRATEMSB_9600},
+            {0x04, RF_BITRATELSB_9600},
+            {0x05, RF_FDEVMSB_20000},
+            {0x06, RF_FDEVLSB_20000},
+            {0x07, 0xD9}, // RegFrfMsb: 868,3 MHz
+            {0x08, 0x13}, // RegFrfMid
+            {0x09, 0x33}, // RegFrfLsb
+            {0x18, RF_LNA_GAINSELECT_AUTO},
+            {0x19, RF_RXBW_DCCFREQ_010 | RF_RXBW_MANT_20 | RF_RXBW_EXP_3}, // 20/2 -> 100khz
+            {0x2C, 0x00}, // RegPreambleMsb: 3 bytes preamble
+            {0x2D, 0x06}, // RegPreambleLsb
+            {0x2E, RF_SYNC_ON | RF_SYNC_SIZE_4}, // RegSyncConfig: Enable sync word, 2 bytes sync word
+            {0x2F, 0xDE}, // RegSyncValue1: 0xDEADBEEF
+            {0x30, 0xAD}, // RegSyncValue2
+            {0x31, 0xBE}, // RegSyncValue3
+            {0x32, 0xEF}, // RegSyncValue4
+            {0x37, 0xD0}, // RegPacketConfig1: Variable length, CRC on, whitening
+            {0x38, 0x40}, // RegPayloadLength: 64 bytes max payload
+            {0x3C, 0x8F}, // RegFifoThresh: TxStart on FifoNotEmpty, 15 bytes FifoLevel
+            {0x58, 0x1B}, // RegTestLna: Normal sensitivity mode
+            {0x6F, 0x30}, // RegTestDagc: Improved margin, use if AfcLowBetaOn=0 (default)
+
 };
 
 // Clock constants. DO NOT CHANGE THESE!
 #define RFM69_XO               32000000    ///< Internal clock frequency [Hz]
-#define RFM69_FSTEP            61,03515625 ///< Step width of synthesizer [Hz]
+#define RFM69_FSTEP            61
 
 
 // Device settings
 static const char *device = "/dev/spidev0.0";
 static uint8_t spi_mode = 0;
 static uint8_t spi_bits = 8; // Must be 8-bit, as that's the only mode the SPI driver support
-static uint32_t spi_speed = 2500000; // 2.5 MHz is the maximum rate the RF12 support (??)
+static uint32_t spi_speed = 500000; // .5 MHz is the maximum rate the RF12 support (??)
 // Going above this value gives wrong readings, and errors
 // ...^^^ is this really true? it probably won't even reaching
 //    the speed of 2.5 MHz...
@@ -99,53 +101,6 @@ void pabort(const char *s)
 {
   perror(s);
   abort();
-}
-
-//
-// rf12_xferSend
-//
-void
-rf12_xferSend(int fd, unsigned char *ptx_buf, unsigned char *prx_buf, int len)
-{
-  // At least one of the buffers should be assigned
-  if ((ptx_buf == NULL) && (prx_buf == NULL))
-    pabort("rf12_xfer: Both transmit and receive buffers are NULL!\n");
-
-  //
-  struct spi_ioc_transfer xfer[1];
-  int status;
-
-  // Clear spi_ioc_transfer structure
-  memset(xfer, 0, sizeof(xfer));
-
-  // Set up spi_ioc_transfer structure
-  // ...rf12 uses full duplex, so we receive bits while we're sending...
-  int count;
-  for (count = 0; count < len / 2; count++)
-  {
-    // Wait for interrupt
-    while (digitalRead(7) != 0)
-      ;
-
-    xfer[0].tx_buf = (unsigned long) (ptx_buf + (count * 2));
-    xfer[0].rx_buf = (unsigned long) (prx_buf + (count * 2));
-    xfer[0].len = 2;
-    xfer[0].delay_usecs = spi_delay;
-    xfer[0].speed_hz = spi_speed;
-    xfer[0].bits_per_word = spi_bits;
-
-    status = ioctl(fd, SPI_IOC_MESSAGE(1), xfer);
-    if (status < 0)
-    {
-      pabort("SP_IOC_MESSAGE");
-    }
-
-    // Strangely enough this seems to help for sending, don't know why
-    // Regardless, only about 40% of the messages really get out...
-    delayMicroseconds(20);
-  }
-
-  return;
 }
 
 //
@@ -232,7 +187,7 @@ RFM69::RFM69(bool highPowerDevice)
   _powerLevel = 0;
   _rssi = -127;
   _ookEnabled = false;
-  _autoReadRSSI = false;
+  _autoReadRSSI = true;
   _dataMode = RFM69_DATA_MODE_PACKET;
   _highPowerSettings = false;
   _csmaEnabled = false;
@@ -423,7 +378,7 @@ void RFM69::writeRegister(uint8_t reg, uint8_t value)
   // transfer value to register and set the write flag
   chipSelect();
 
-  uint16_t cmd = ((reg | 0x80) << 8) | value;
+  uint16_t cmd = ((reg | 0x80) << 8) | (((uint16_t)value) & 0xff);
   rf12_xferCmd(_fd, cmd);
 
   chipUnselect();
@@ -772,8 +727,18 @@ int RFM69::_receive(unsigned char* data, unsigned int dataLength)
     waitForModeReady();
   }
 
-  // check for flag PayloadReady
-  if (readRegister(0x28) & 0x04)
+  uint8_t r;
+  r = readRegister(0x24);
+  uint8_t r2 = readRegister(0x27);
+  if ((r < 0xc0) || (r2 & 0x07))
+  {
+    printf("0x24: %x 0x27:%x\r\n", r, r2);
+  }
+
+
+  r = readRegister(0x28);
+//  if (r)  printf("0x28: %x\r\n", r);
+  if (r & 0x04)
   {
     // go to standby before reading data
     setMode(RFM69_MODE_STANDBY);
@@ -786,17 +751,22 @@ int RFM69::_receive(unsigned char* data, unsigned int dataLength)
     {
       // read next byte
       data[bytesRead] = readRegister(0x00);
+      printf("%x ", data[bytesRead]);
       bytesRead++;
     }
 
+    printf("\r\n");
     // automatically read RSSI if requested
     if (true == _autoReadRSSI)
     {
       readRSSI();
+      printf("rssi: %d\r\n", _rssi);
     }
 
     // go back to RX mode
     setMode(RFM69_MODE_RX);
+    writeRegister(0x3D, readRegister (0x3D) | 0x04 );
+
     // todo: wait needed?
     //    waitForModeReady();
 

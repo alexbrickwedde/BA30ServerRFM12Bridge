@@ -1,2 +1,5 @@
-rfm69 : rfm12bridge.cxx rfm69.cxx
-	g++ rfm12bridge.cxx rfm69.cxx -lwiringPi -o rfm69 -DDEBUG
+rfmbridge : main.cxx rfm69.cxx
+	g++ main.cxx rfm69.cxx -lwiringPi -o rfmbridge -DDEBUG
+
+install : rfmbridge
+	cp rfmbridge /opt/
